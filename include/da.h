@@ -10,7 +10,7 @@
 #include <string.h>
 
 // constants
-#define DEFAULT_CAPACITY 2
+#define DEFAULT_CAPACITY 8
 #define GROWTH_FACTOR    2
 
 ////////////////////////////////// DYNAMIC ARRAY //////////////////////////////////
@@ -54,6 +54,7 @@ typedef struct {
 
 void* da_accommodate(void* arr, size_t item_size, size_t n_items);
 void* da_init(void* da, size_t item_size);
+
 ////////////////////////////////// QUEUE //////////////////////////////////
 typedef struct {
     size_t capacity;
@@ -95,9 +96,11 @@ void* daq_init(void* q, size_t item_size);
 
 typedef da_header_t stack_header_t;
 
-#define stack_push         da_append
-#define stack_pop(stack)   (da_header(stack)->count--, (stack)[da_header(stack)->count])
-#define stack_empty(stack) (da_header(stack)->count > 0)
+#define stack_count      da_count
+#define stack_push       da_append
+#define stack_pop(stack) (da_header(stack)->count--, (stack)[da_header(stack)->count])
+// #define stack_empty(stack) (da_header(stack)->count == 0)
+#define stack_empty(stack) ((stack) ? da_header(stack)->count == 0 : true)
 #define stack_free(stack)  da_free(free)
 #endif // DYNAMIC_ARRAY_H_
 
@@ -124,18 +127,21 @@ void* da_accommodate(void* da, size_t item_size, size_t n_items) {
 
     // if da is null we need to make a new header
     size_t cap       = da_capacity(da);
+    size_t ocap      = cap;
     size_t count     = da_count(da);
     size_t new_count = count + n_items;
 
+    if (new_count <= cap) {
+        return da;
+    }
+
     // if da->count > da_capacity then make capacity = count * growth factor
-    if (new_count > cap) {
-        while (new_count > cap) {
-            cap *= GROWTH_FACTOR;
-        }
+    while (new_count > cap) {
+        cap *= GROWTH_FACTOR;
     }
 
     // alloc new array -> either init or realloc | Note this will free da if succesful
-    fprintf(stderr, "%s:%d:(re)Allocation\n", __FILE__, __LINE__);
+    fprintf(stderr, "%s:%d:(re)Allocation %zu %zu | %zu %zu\n", __FILE__, __LINE__, count, ocap, new_count, cap);
     void* tmp = realloc(da_header(da), item_size * cap + sizeof(da_header_t));
     if (tmp == NULL) {
         fprintf(stderr, "(re)Allocation of %p failed at %s:%d\n", tmp, __FILE__, __LINE__);
@@ -157,9 +163,9 @@ void* daq_init(void* q, size_t item_size) {
     }
     tmp = (char*) tmp + sizeof(daq_header_t); // use char* cast to move by bytes
     // da_header(tmp)->items    = 0;
-    daq_header(tmp)->count = 0;
-    daq_header(tmp)->front = 0;
-    daq_header(tmp)->back  = 0;
+    daq_header(tmp)->count    = 0;
+    daq_header(tmp)->front    = 0;
+    daq_header(tmp)->back     = 0;
     daq_header(tmp)->capacity = DEFAULT_CAPACITY;
     q                         = tmp;
     return q;

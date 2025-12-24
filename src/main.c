@@ -7,17 +7,23 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define BOARD_SIZE 15
+/*
+TODO:
+- make tickets a stack as well (its literly a stack of cards)
+*/
+
+#define BOARD_SIZE 16
 #define N_PLAYERS  5
-#define N_TICKETS  5
-#define N_CAMELS   7
 #define N_DICE     5
+
+#define N_BETS_COLORS 5 // 1 per regular camel color
+#define N_TICKETS     4 // 5,3,2,2
+#define N_CAMELS      7 // reg + 2 crazy
 
 typedef enum { BRED, BBLUE, BYELLOW, BGREEN, BPURPLE } BetColor;
 typedef enum { CRED, CBLUE, CYELLOW, CGREEN, CPURPLE, CWHITE, CBLACK } CamelColor;
 typedef enum { DRED, DBLUE, DYELLOW, DGREEN, DPURPLE, DGREY } DiceColor;
-typedef enum { FOWARD, REVERSE } Orientation;
-
+typedef enum { FORWARD, REVERSE } Orientation;
 
 const char* enum2char(CamelColor color) {
     switch (color) {
@@ -57,7 +63,7 @@ typedef struct {
 typedef struct {
     CamelColor color;
     Orientation orientation;
-    int space; // space the camel is on
+    int space; // space the camel is on - NOT NEEDED
 } Camel;
 
 typedef struct {
@@ -75,61 +81,110 @@ typedef struct {
     int id;
     int points;
     bool used_spec;
-    Bet hand[N_TICKETS];
+    BetColor hand[N_BETS_COLORS]; // the color cards you have left to bet for dinner or loser
 } Player;
 
 typedef struct {
     int turn;
-    Player players[N_PLAYERS];
     Tile board[BOARD_SIZE]; // array of tiles each tile can either be a stack of camels or a spec
-    Bet winner_bets[N_PLAYERS * N_TICKETS];
-    Bet loser_bets[N_PLAYERS * N_TICKETS];
-    Ticket* red_tickets;
-    Ticket* blue_tickets;
-    Ticket* yellow_tickets;
-    Ticket* green_tickets;
-    Ticket* purple_tickets;
+    Player players[N_PLAYERS];
+    Bet winner_bets[N_PLAYERS * N_BETS_COLORS];
+    Bet loser_bets[N_PLAYERS * N_BETS_COLORS];
+    Ticket tickets[N_BETS_COLORS][N_TICKETS];
 } Game;
-
-//////////////////////////////////// Tile //////////////////////////////////////
-
-bool camels_empty(CamelStack* stack) { return stack->count == 0 ? true : false; }
-bool camels_full(CamelStack* stack) { return stack->count == N_CAMELS ? true : false; }
-void camels_push(CamelStack* stack, Camel camel) { stack->camels[stack->count++] = camel; }
-Camel camels_pop(CamelStack* stack) {
-    Camel camel = stack->camels[--stack->count];
-    return camel;
-}
-void place_camel(Game* game, int space, Camel camel) { camels_push(&game->board[space].camel_stack, camel); }
 
 //////////////////////////////////// Game State //////////////////////////////////////
 
-void init_game(void) {
-    // alloc/set up all the game elements above
+int rand_range(int low, int high) { return (rand() % (high - low + 1)) + low; }
+
+void init_game(Game* game) {
+
+    ///// set up board /////////
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        game->board[i].camel_stack = NULL;
+        game->board[i].has_spec    = false;
+    }
+
+    ///// Place camels on board /////////
+    for (int c = 0; c < N_CAMELS; c++) {
+        int starting_tile = rand_range(0, 2);
+        Camel camel       = {0};
+        camel.color       = (CamelColor) c;
+        camel.orientation = FORWARD;
+
+        if ((CamelColor) c == CBLACK || (CamelColor) c == CWHITE) {
+            starting_tile     = BOARD_SIZE - starting_tile - 1;
+            camel.orientation = REVERSE;
+        }
+        camel.space = starting_tile;
+        stack_push(game->board[starting_tile].camel_stack, camel);
+    }
+
+    ///// Players /////////
+    for (int i = 0; i < N_PLAYERS; i++) {
+        Player p         = {.id = i, .points = 0, .used_spec = false, .hand = {BRED, BBLUE, BYELLOW, BGREEN, BPURPLE}};
+        game->players[i] = p;
+    }
+
+    ///// Wagers /////////
+}
+void reset_tickets(Game* game) {
+
+    for (int i = 0; i < N_BETS_COLORS; i++) {
+        BetColor color = (BetColor) i;
+        for (int j = 0; j < N_TICKETS; j++) {
+            int amount;
+            if (j == 0) {
+                amount = 5;
+            } else if (j == 1) {
+                amount = 3;
+            } else {
+                amount = 2;
+            }
+            Ticket t            = {.amount = amount, .color = color, .player_id = -1};
+            game->tickets[i][j] = t;
+        }
+    }
 }
 
-// void init_round(Game* game) {};
-//
+void init_round(Game* game) {
+    // reset dice count
+
+    // reset tickets
+    reset_tickets(game);
+
+    // remove spec cards
+    for (int i = 0; i < N_PLAYERS; i++) {
+        game->players[i].used_spec = false;
+    }
+
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        game->board[i].has_spec = false;
+    }
+}
+
 // void end_round(Game* game) {};
 
 //////////////////////////////////// Turn //////////////////////////////////////
 
-// assign ticket on top of stack to player
-bool assign_ticket(TicketStack* ts, Player* player) {
-    if (ts->count < 0) {
-        return false;
+bool assign_ticket(Game* game, BetColor color, int player_id) {
+
+    Ticket* tickets = game->tickets[(int) color];
+
+    bool available = false;
+
+    for (int i = 0; i < N_TICKETS; i++) {
+        if (tickets[i].player_id == -1) {
+            available            = true;
+            tickets[i].player_id = player_id;
+        }
     }
-    ts->tickets[ts->count].player_id = player->id;
-    ts->count--;
-    return true;
+    return available;
 }
 
-// void list_available_tickets(Game* game, Ticket* tickets) {};
-// void make_winner_wager() {};
-// void make_loser_wafer() {};
 bool place_spec_tile(Game* game, int space, Spectator spec) {
     // check if spec next to tile or on tile
-    if (game->board[space].camel_stack.count > 0 || game->board[space].has_spec ||
+    if (stack_count(game->board[space].camel_stack) > 0 || game->board[space].has_spec ||
         (space != BOARD_SIZE && game->board[space + 1].has_spec) || (space != 0 && game->board[space - 1].has_spec)) {
         return false;
     }
@@ -139,8 +194,6 @@ bool place_spec_tile(Game* game, int space, Spectator spec) {
 }
 
 void roll_dice(Roll* die) {
-    // randomly select color from DiceColor
-    srand((unsigned int) time(NULL));
 
     int random_int = rand() % N_DICE + 1;
 
@@ -148,23 +201,43 @@ void roll_dice(Roll* die) {
     DiceColor random_color = (DiceColor) random_int;
     if (random_color == DGREY) {
         // if Grey randomly select 0 or 1 for black or white
-        die->color = (CamelColor) ((rand() % 2) + N_TICKETS);
+        die->color = (CamelColor) ((rand() % 2) + N_BETS_COLORS);
     } else {
         die->color = (CamelColor) random_color;
     }
 
-    die->value = (rand() % 3) + 1;
+    die->value = rand_range(1, 3);
+}
+Camel* get_camel(Game* game, CamelColor color) {
+
+    for (int i = 0; i < BOARD_SIZE; i++) {
+        Camel* stack = game->board[i].camel_stack;
+        for (size_t j = 0; j < stack_count(stack); j++) {
+            if (stack[j].color == color) {
+                return &stack[j];
+            }
+        }
+    }
+    return NULL;
 }
 
-void move_camel(Game* game, Camel* camel, int spaces) {
-    printf("COLOR: %s", enum2char(camel->color));
+void move_camel(Game* game, CamelColor color, int spaces) {
     int dest;
+    Camel* camel = get_camel(game, color);
+    assert(camel != NULL && "Could not find your camel");
     int curr_space = camel->space;
+
+    Orientation move_orientation = FORWARD;
 
     if (game->board[curr_space + spaces].has_spec) {
         Spectator spec = game->board[curr_space + spaces].spec;
-        game->players[spec.player].points++;          // Give point to player who placed spec
-        if (spec.orientation == camel->orientation) { // foward and +1 or reverse and -1
+
+        if (spec.orientation == REVERSE || camel->orientation == REVERSE) {
+            move_orientation = REVERSE;
+        }
+
+        // game->players[spec.player].points++;          // Give point to player who placed spec
+        if (spec.orientation == camel->orientation) { // forward and +1 or reverse and -1
             spaces++;
         } else {
             spaces--;
@@ -178,110 +251,128 @@ void move_camel(Game* game, Camel* camel, int spaces) {
     }
 
     // move all camels in stack to dest
-    CamelStack tmp    = {0};
-    CamelStack* stack = &game->board[curr_space].camel_stack;
-    bool match        = false;
-    Camel curr_camel  = {0};
-    while (!match || !camels_empty(stack)) {
-        curr_camel = camels_pop(stack);
-        camels_push(&tmp, curr_camel);
-        printf("%s", enum2char(curr_camel.color));
-        printf("%s", enum2char(camel->color));
-        match = curr_camel.color == camel->color ? true : false;
+    Camel* tmp       = NULL;
+    Camel* tmp2      = NULL; // only used if going backwards
+    Camel curr_camel = {0};
+
+    Camel** stack      = &game->board[curr_space].camel_stack;
+    Camel** dest_stack = &game->board[dest].camel_stack;
+
+    // what if dest == stack
+
+    bool match_found = false;
+    while (!match_found) { // pop from start stack until we reach desired camel
+        curr_camel  = stack_pop(*stack);
+        match_found = curr_camel.color == color ? true : false;
+        stack_push(tmp, curr_camel);
     }
 
-    while (!camels_empty(&tmp)) {
-        curr_camel       = camels_pop(&tmp);
-        curr_camel.space = dest;
-        camels_push(&game->board[dest].camel_stack, curr_camel);
+    // if camels are going in reverse, pop the dest stack into a tmp stack, then push start stack into dest and then
+    // push dest stack
+    if (move_orientation == REVERSE) {
+        while (!stack_empty(*dest_stack)) {
+            curr_camel = stack_pop(*dest_stack);
+            stack_push(tmp2, curr_camel);
+        }
     }
-    // if (camel->orientation == REVERSE) {
-    //
-    //     // move all camels in stack to dest
-    //     CamelStack tmp2    = {0};
-    //     CamelStack* stack2 = &game->board[dest].camel_stack;
-    //     match              = false;
-    //
-    //     while (!match) {
-    //         curr_camel = camels_pop(stack2);
-    //         camels_push(&tmp2, curr_camel);
-    //         match = (curr_camel.color == camel->color) ? true : false;
-    //     }
-    //
-    //     while (!camels_empty(&tmp2)) {
-    //         curr_camel       = camels_pop(&tmp2);
-    //         curr_camel.space = dest;
-    //         camels_push(&game->board[dest].camel_stack, curr_camel);
-    //     }
-    // }
+
+    while (!stack_empty(tmp)) {
+        curr_camel = stack_pop(tmp);
+        // printf("pushed: %s ", enum2char(curr_camel.color));
+        curr_camel.space = dest;
+        stack_push(*dest_stack, curr_camel);
+    }
+
+    if (move_orientation == REVERSE) {
+        while (!stack_empty(tmp2)) {
+            curr_camel       = stack_pop(tmp2);
+            curr_camel.space = dest;
+            stack_push(*dest_stack, curr_camel);
+        }
+    }
 }
 
 //////////////////////////////////// I/O //////////////////////////////////////
 
-void get_user_input(Game* game, Player* player) {
-    // pick a ticket
-
-    // place a Spectator tile
-
-    // wager on winner/loser
-
-    // roll dice
-}
+// void get_user_input(Game* game, Player* player) {
+//     // pick a ticket
+//
+//     // place a Spectator tile
+//
+//     // wager on winner/loser
+//
+//     // roll dice
+// }
 
 void render_game(Game* game) {
-    printf("\n\n");
-    for (int i = 0; i <= BOARD_SIZE; i++) {
+    // printf("\e[1;1H\e[2J");
+    for (int i = 0; i < BOARD_SIZE; i++) {
 
         Tile tile = game->board[i];
 
-        printf("%d\t", i + 1);
+        printf("%d\t", i);
 
         if (tile.has_spec) {
-            char* val = tile.spec.orientation == FOWARD ? "+1" : "-1";
+            char* val = tile.spec.orientation == FORWARD ? "+1" : "-1";
             printf("[%s | p%d] ", val, tile.spec.player);
         } else {
-            int count = tile.camel_stack.count;
-            for (int j = count; j > 0; --j) {
-                printf("%s", enum2char(tile.camel_stack.camels[j].color));
+            for (size_t j = 0; j < stack_count(tile.camel_stack); j++) {
+                printf("%s ", enum2char(tile.camel_stack[j].color));
             }
         }
         printf("\n");
     }
 }
 
+void render_horizontal(Game* game) {
+
+    for (size_t i = N_CAMELS; i > 0; i--) {
+        printf(" %zu | ", i);
+        for (size_t j = 0; j < BOARD_SIZE; j++) {
+            if (stack_count(game->board[j].camel_stack) >= i) {
+                printf(" %2s ", enum2char(game->board[j].camel_stack[i - 1].color));
+            } else {
+                printf("    ");
+            }
+        }
+        printf("\n");
+    }
+    printf("     ");
+    for (size_t j = 0; j < BOARD_SIZE; j++) {
+        printf(" %2zu ", j);
+    }
+    printf("\n");
+}
+
 #ifndef TEST_BUILD
 int main(int argc, char** argv) {
+    // srand((unsigned int) time(NULL));
+    srand((unsigned int) 4);
 
-    printf("Hello World!\n");
+    // printf("Hello World!\n");
     Game game = {0};
-    Camel c   = {.color = CGREEN, .orientation = FOWARD, .space = 2};
-    place_camel(&game, 0, c);
-    Spectator s = {.orientation = FOWARD, .player = 2};
-    place_spec_tile(&game, 2, s);
-    render_game(&game);
+    init_game(&game);
+    render_horizontal(&game);
+    int curr_player_id = 0;
+    bool end_game      = false;
+    while (!end_game) {
+        init_round(&game); // reset wager and spec cards
+        int rolled_dice = N_DICE - 1;
+        while (rolled_dice > 0) {
+            Player curr_player = game.players[curr_player_id];
 
-    move_camel(&game, &c, 3);
-    render_game(&game);
+            // get next players input
 
-    // int curr_player_id = 0;
-    //
-    // bool end_game = false;
-    // while (!end_game) {
-    //     int rolled_dice = N_DICE - 1;
-    //     while (rolled_dice > 0) {
-    //         Player curr_player = game.players[curr_player_id];
-    //
-    //         // get next players input
-    //         // update game state
-    //         // render game state
-    //
-    //         curr_player_id = (curr_player.id + 1) % N_PLAYERS;
-    //         rolled_dice--;
-    //     }
-    //
-    //     // give out points
-    //     // reset wagers and specs
-    // }
+            // update game state
+
+            // render game state
+
+            curr_player_id = (curr_player.id + 1) % N_PLAYERS;
+            rolled_dice--;
+        }
+
+        // give out points
+    }
 
     return 0;
 }
