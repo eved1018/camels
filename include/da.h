@@ -48,7 +48,7 @@ typedef struct {
 
 #define da_append(da, item)                                                                                            \
     do {                                                                                                               \
-        (da)                         = (da == NULL) ? da_init(da, sizeof *(da)) : da_accommodate(da, sizeof *(da), 1); \
+        (da) = ((da) == NULL) ? da_init((da), sizeof *(da)) : da_accommodate((da), sizeof *(da), 1);                   \
         (da)[da_header(da)->count++] = (item);                                                                         \
     } while (0)
 
@@ -96,14 +96,16 @@ void* daq_init(void* q, size_t item_size);
 
 typedef da_header_t stack_header_t;
 
-#define stack_count      da_count
-#define stack_push       da_append
-#define stack_pop(stack) (da_header(stack)->count--, (stack)[da_header(stack)->count])
-// #define stack_empty(stack) (da_header(stack)->count == 0)
+#define stack_count           da_count
+#define stack_push            da_append
+#define stack_pop(stack)      (da_header(stack)->count--, (stack)[da_header(stack)->count])
+#define stack_peak(stack)     ((stack)[da_header(stack)->count - 1])
+#define stack_peakn(stack, n) ((stack)[da_header(stack)->count - (n) - 1])
 #define stack_empty(stack) ((stack) ? da_header(stack)->count == 0 : true)
 #define stack_free(stack)  da_free(free)
-#endif // DYNAMIC_ARRAY_H_
 
+#endif // DYNAMIC_ARRAY_H_
+#define DYNAMIC_ARRAY_IMPLEMENTATION
 #ifdef DYNAMIC_ARRAY_IMPLEMENTATION
 
 void* da_init(void* da, size_t item_size) {
@@ -124,8 +126,6 @@ void* da_init(void* da, size_t item_size) {
 }
 
 void* da_accommodate(void* da, size_t item_size, size_t n_items) {
-
-    // if da is null we need to make a new header
     size_t cap       = da_capacity(da);
     size_t ocap      = cap;
     size_t count     = da_count(da);
