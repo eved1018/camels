@@ -11,15 +11,18 @@
 TODO:
 - make tickets a stack as well (its literly a stack of cards)
 - convert Orientation to bool
+- break main and get_user_input into smaller functions
 */
 
-#define BOARD_SIZE 17 // 16 for real game 17th is for winning camels
-#define N_PLAYERS  5
-#define N_DICE     5
+#define DEBUG(fmt, ...) fprintf(stderr, "DEBUG %s %d " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
+#define LOG(fmt, ...)   fprintf(stderr, "LOG %s %d " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
 
-#define N_BETS_COLORS 5 // 1 per regular camel color
-#define N_TICKETS     4 // 5,3,2,2
-#define N_CAMELS      7 // reg + 2 crazy
+#define BOARD_SIZE    17 // 16 for real game 17th is for winning camels
+#define N_PLAYERS     6  // number of players
+#define N_DICE        5  // number of dice per round - one less than total dice
+#define N_BETS_COLORS 5  // 1 per regular camel color
+#define N_TICKETS     4  // 5,3,2,2
+#define N_CAMELS      7  // reg + 2 crazy
 #define MAX_WAGERS    N_PLAYERS* N_BETS_COLORS
 
 typedef enum { BRED, BBLUE, BYELLOW, BGREEN, BPURPLE } BetColor;
@@ -28,7 +31,7 @@ typedef enum { DRED, DBLUE, DYELLOW, DGREEN, DPURPLE, DGREY } DiceColor;
 typedef enum { FORWARD, REVERSE } Orientation;
 typedef enum { WAGER, ROLL, TICKET, SPECTATOR } TurnType;
 
-const char* oreint2char(Orientation oreint) {
+const char* orient2char(Orientation oreint) {
     if (oreint == FORWARD) {
         return "+";
     }
@@ -37,22 +40,22 @@ const char* oreint2char(Orientation oreint) {
 
 const char* enum2char(CamelColor color) {
     switch (color) {
-    case CRED:
-        return "R";
-    case CBLUE:
-        return "B";
-    case CYELLOW:
-        return "Y";
-    case CGREEN:
-        return "G";
-    case CPURPLE:
-        return "P";
-    case CBLACK:
-        return "K";
-    case CWHITE:
-        return "W";
-    default:
-        return NULL;
+        case CRED:
+            return "R";
+        case CBLUE:
+            return "B";
+        case CYELLOW:
+            return "Y";
+        case CGREEN:
+            return "G";
+        case CPURPLE:
+            return "P";
+        case CBLACK:
+            return "K";
+        case CWHITE:
+            return "W";
+        default:
+            return NULL;
     }
 }
 
@@ -69,9 +72,19 @@ typedef struct {
 } Roll;
 
 typedef struct {
+    size_t count;
+    Roll rolled[N_DICE];
+} Dice;
+
+typedef struct {
     int player;
     BetColor color;
-} Bet;
+} Wager;
+
+typedef struct {
+    size_t count;
+    Wager items[MAX_WAGERS];
+} Wagers;
 
 typedef struct {
     BetColor color;
@@ -108,14 +121,56 @@ typedef struct {
     bool winner;
     int turn;
     int round_rolled_dice;
-    Roll die;
-    Tile board[BOARD_SIZE]; // array of tiles each tile can either be a stack of camels or a spec - add one for winnner
-                            // spot
+    Dice dice;
+    Tile board[BOARD_SIZE]; // array of tiles each tile can either be a stack of camels or a spec - add one for
+                            // winnner spot
     Player players[N_PLAYERS];
-    Bet winner_bets[MAX_WAGERS];
-    Bet loser_bets[MAX_WAGERS];
     Ticket tickets[N_BETS_COLORS][N_TICKETS];
+    Wagers winner_bets; // stacks
+    Wagers loser_bets;  // stacks
 } Game;
+
+//////////////////////////////////// Stack //////////////////////////////////////
+
+bool wager_push(Wagers* wagers, Wager w) {
+    if (wagers->count < MAX_WAGERS) {
+        wagers->items[wagers->count++] = w;
+        return true;
+    }
+    return false;
+}
+
+bool wager_pop(Wagers* wagers, Wager* w) {
+    if (wagers->count > 0) {
+        *w = wagers->items[--wagers->count];
+        return true;
+    }
+    return false;
+}
+
+bool dice_push(Dice* dice, Roll r) {
+    if (dice->count < N_DICE) {
+        dice->rolled[dice->count++] = r;
+        return true;
+    }
+    return false;
+}
+
+bool dice_pop(Dice* dice, Roll* r) {
+    if (dice->count > 0) {
+        *r = dice->rolled[--dice->count];
+        return true;
+    }
+    return false;
+}
+
+bool dice_peek(Dice* dice, Roll* r) {
+    if (dice->count > 0) {
+        *r = dice->rolled[dice->count];
+        return true;
+    }
+    return false;
+}
 
 //////////////////////////////////// Game State //////////////////////////////////////
 
@@ -142,12 +197,16 @@ void reset_tickets(Game* game) {
     }
 }
 
-void init_game(Game* game) {
-
-    Roll die                = {0};
-    game->die               = die;
+void reset_dice(Game* game) {
+    Dice dice               = {0};
+    game->dice              = dice;
     game->round_rolled_dice = N_DICE - 1;
-    game->winner            = false;
+}
+
+void init_game(Game* game) {
+    reset_dice(game);
+
+    game->winner = false;
 
     ///// set up board /////////
     for (int i = 0; i < BOARD_SIZE; i++) {
@@ -178,6 +237,36 @@ void init_game(Game* game) {
     reset_tickets(game);
 
     ///// Wagers /////////
+    Wagers losing_bets = {0};
+    game->loser_bets   = losing_bets;
+
+    Wagers winning_bets = {0};
+    game->loser_bets    = winning_bets;
+}
+
+void score_wagers(Game* game, BetColor first, BetColor last) {
+
+    // give out points for bets
+    Wager w       = {0};
+    int scores[6] = {1, 2, 3, 5, 8};
+    int n         = 5;
+    while (wager_pop(&game->winner_bets, &w)) {
+        if (w.color == first) {
+            game->players[w.player].points += scores[n];
+            n = (n > 0) ? (n - 1) : 0;
+        } else {
+            game->players[w.player].points--;
+        }
+    }
+    n = 5;
+    while (wager_pop(&game->loser_bets, &w)) {
+        if (w.color == last) {
+            game->players[w.player].points += scores[n];
+            n = (n > 0) ? (n - 1) : 0;
+        } else {
+            game->players[w.player].points--;
+        }
+    }
 }
 
 void assign_points(Game* game, CamelColor top, CamelColor second) {
@@ -199,13 +288,27 @@ void assign_points(Game* game, CamelColor top, CamelColor second) {
     }
 }
 
+int get_last_camel(Game* game) {
+    int last = -1;
+    for (int b = 0; b < BOARD_SIZE - 1; b++) {
+        Camel** stack = &game->board[b].camel_stack;
+        for (size_t j = 0; j < stack_count(*stack); j--) {
+            CamelColor bottom = (*stack)[j].color;
+            if (bottom != CBLACK && bottom != CWHITE) {
+                last = (int) j;
+            }
+        }
+    }
+    return last;
+}
+
 void get_top_camels(Game* game, int* first, int* second) {
 
     // get top_camel and second place dont count black and white camel
     *first  = -1;
     *second = -1;
 
-    for (int b = BOARD_SIZE - 1; b > 0; b--) {
+    for (size_t b = BOARD_SIZE - 1; b > 0; b--) {
         Camel** stack = &game->board[b].camel_stack;
         for (size_t j = stack_count(*stack); j > 0; j--) {
             CamelColor top = (*stack)[j - 1].color;
@@ -226,7 +329,7 @@ void end_round(Game* game, int* first, int* second) {
     assign_points(game, (CamelColor) *first, (CamelColor) *second);
 
     // reset dice count
-    game->round_rolled_dice = N_DICE - 1;
+    reset_dice(game);
 
     // remove spec cards
     for (int i = 0; i < N_PLAYERS; i++) {
@@ -237,6 +340,12 @@ void end_round(Game* game, int* first, int* second) {
         game->board[i].has_spec = false;
     }
     reset_tickets(game);
+
+    if (game->winner) {
+        int last = get_last_camel(game);
+        assert(last != -1 && "Could not get losing camel");
+        score_wagers(game, (BetColor) *first, (BetColor) last);
+    }
 }
 
 //////////////////////////////////// Turn //////////////////////////////////////
@@ -293,7 +402,8 @@ bool place_spec_tile(Game* game, int player_id, int space, Spectator spec) {
     return true;
 }
 
-void roll_dice(Roll* die) {
+void roll_dice(Game* game) {
+    Roll die = {0};
 
     int random_int = rand() % N_DICE + 1;
 
@@ -301,13 +411,17 @@ void roll_dice(Roll* die) {
     DiceColor random_color = (DiceColor) random_int;
     if (random_color == DGREY) {
         // if Grey randomly select 0 or 1 for black or white
-        die->color = (CamelColor) ((rand() % 2) + N_BETS_COLORS);
+        die.color = (CamelColor) ((rand() % 2) + N_BETS_COLORS);
+        die.value = rand_range(1, 3) * -1;
+
     } else {
-        die->color = (CamelColor) random_color;
+        die.color = (CamelColor) random_color;
+        die.value = rand_range(1, 3);
     }
 
-    die->value = rand_range(1, 3);
+    dice_push(&game->dice, die);
 }
+
 Camel* get_camel(Game* game, CamelColor color) {
 
     for (int i = 0; i < BOARD_SIZE; i++) {
@@ -327,16 +441,14 @@ void move_camel(Game* game, CamelColor color, int spaces) {
     assert(camel != NULL && "Could not find your camel");
     int curr_space = camel->space;
 
-    Orientation move_orientation = FORWARD;
+    Orientation move_orientation = camel->orientation;
 
     if (game->board[curr_space + spaces].has_spec) {
         Spectator spec = game->board[curr_space + spaces].spec;
 
-        if (spec.orientation == REVERSE || camel->orientation == REVERSE) {
-            move_orientation = REVERSE;
-        }
+        move_orientation = spec.orientation;
 
-        // game->players[spec.player].points++;          // Give point to player who placed spec
+        game->players[spec.player].points++;          // Give point to player who placed spec
         if (spec.orientation == camel->orientation) { // forward and +1 or reverse and -1
             spaces++;
         } else {
@@ -344,6 +456,10 @@ void move_camel(Game* game, CamelColor color, int spaces) {
         }
     }
     dest = curr_space + spaces;
+
+    if (dest < 0) {
+        dest = 0;
+    }
 
     if (dest >= BOARD_SIZE - 1) {
         game->winner = true;
@@ -392,89 +508,155 @@ void move_camel(Game* game, CamelColor color, int spaces) {
 
 //////////////////////////////////// I/O //////////////////////////////////////
 
-Turn get_user_input(Game* game, int player_id) {
-    printf("[R]oll, [W]ager, Take a [T]icket or Place [S]pectator");
-    Turn turn = {0};
-    char input_char;
-    scanf("%c", &input_char);
+char read_char(void) {
+    char input;
+    scanf(" %c", &input);
+    return input;
+}
+
+int read_int(void) {
+    int input;
+    scanf(" %d", &input);
+    return input;
+}
+// TODO break into smaller functions
+void get_user_input(Game* game, int player_id, Turn* turn) {
+    printf("Player %d turn: [R]oll, [W]ager, Take a [T]icket or Place [S]pectator\n", player_id);
+    char input_char = read_char();
+    printf("Read input as: %c\n", input_char);
     switch (input_char) {
-    case 'R': {
-        turn.turn_type = ROLL;
-        break;
-    };
-    case 'W': {
-        if (game->players[player_id].hand_size < 0) {
-            printf("No cards to wager");
-            return get_user_input(game, player_id);
-        }
-        printf("[W]inner or [L]oser");
-        break;
-    };
-
-    case 'T': {
-        printf("Select ticket [R]ED, [B]LUE, [Y]ELLOW, [G]REEN, [P]URPLE");
-        scanf("%c", &input_char);
-        switch (input_char) {
         case 'R': {
-            turn.color = BRED;
+            turn->turn_type = ROLL;
             break;
         };
-        case 'B': {
-            turn.color = BBLUE;
-            break;
-        };
-        case 'Y': {
-            turn.color = BYELLOW;
-            break;
-        };
-        case 'G': {
-            turn.color = BGREEN;
-            break;
-        };
-        case 'P': {
-            turn.color = BPURPLE;
-            break;
-        };
-        default:
-            return get_user_input(game, player_id);
-            break;
-        }
-    }
-    case 'S': {
-        int* buff = NULL;
-        get_possible_spec_location(game, buff);
-        printf("Pick a location to place the Spectator tile:");
-        for (size_t i = 0; i < da_count(buff); i++) {
-            printf(" [%d] ", buff[i]);
-        }
-        int pos = 0;
-        scanf("%d", &pos);
-        turn.position = pos;
-        printf("[+]1 or [-]1");
-        scanf("%c", &input_char);
-        turn.orientation = input_char == '+' ? FORWARD : REVERSE;
-        break;
-    };
-    default: {
-        return get_user_input(game, player_id);
-        break;
-    }
-    }
+        case 'W': {
+            turn->turn_type = WAGER;
+            if (game->players[player_id].hand_size < 0) {
+                printf("No cards to wager\n");
+                get_user_input(game, player_id, turn); // TODO RESET
+            }
+            printf("[W]inner or [L]oser\n");
+            input_char = read_char();
+            switch (input_char) {
+                case 'W': {
+                    turn->orientation = FORWARD;
+                    break;
+                }
+                case 'L': {
+                    turn->orientation = REVERSE;
+                    break;
+                }
+                default: {
+                    get_user_input(game, player_id, turn);
+                    break;
+                }
+            }
 
-    return turn;
+            printf("Select a Camel to wager on: [R]ED, [B]LUE, [Y]ELLOW, [G]REEN, [P]URPLE\n");
+            input_char = read_char();
+            printf("Read input as: %c\n", input_char);
+            switch (input_char) {
+                case 'R': {
+                    turn->color = BRED;
+                    break;
+                };
+                case 'B': {
+                    turn->color = BBLUE;
+                    break;
+                };
+                case 'Y': {
+                    turn->color = BYELLOW;
+                    break;
+                };
+                case 'G': {
+                    turn->color = BGREEN;
+                    break;
+                };
+                case 'P': {
+                    turn->color = BPURPLE;
+                    break;
+                };
+                default:
+                    get_user_input(game, player_id, turn); // TODO RESET
+
+                    break;
+            }
+            break;
+        };
+
+        case 'T': {
+            turn->turn_type = TICKET;
+            printf("Select ticket [R]ED, [B]LUE, [Y]ELLOW, [G]REEN, [P]URPLE\n");
+            input_char = read_char();
+            printf("Read input as: %c\n", input_char);
+            switch (input_char) {
+                case 'R': {
+                    turn->color = BRED;
+                    break;
+                };
+                case 'B': {
+                    turn->color = BBLUE;
+                    break;
+                };
+                case 'Y': {
+                    turn->color = BYELLOW;
+                    break;
+                };
+                case 'G': {
+                    turn->color = BGREEN;
+                    break;
+                };
+                case 'P': {
+                    turn->color = BPURPLE;
+                    break;
+                };
+                default:
+                    get_user_input(game, player_id, turn); // TODO RESET
+                    break;
+            }
+            break;
+        }
+        case 'S': {
+            turn->turn_type = SPECTATOR;
+            // int* buff = NULL;
+            // get_possible_spec_location(game, buff); // TODO check that this is a valid spot
+            printf("Pick a location to place the Spectator tile:\n");
+            int pos        = read_int();
+            turn->position = pos;
+            printf("[+]1 or [-]1\n");
+            input_char = read_char();
+            switch (input_char) {
+                case '+': {
+                    turn->orientation = FORWARD;
+                    break;
+                };
+                case '-': {
+                    turn->orientation = REVERSE;
+                    break;
+                };
+                default: {
+                    get_user_input(game, player_id, turn); // TODO RESET
+                    break;
+                }
+            }
+            turn->orientation = input_char == '+' ? FORWARD : REVERSE;
+            break;
+        };
+        default: {
+            get_user_input(game, player_id, turn); // TODO RESET
+
+            break;
+        }
+    }
 }
 
 void render_horizontal(Game* game) {
 
     // render wagers
 
-    // printf("Wagers\n");
-    // printf("Winners: \n");
-    //
-    // for (int i = 0; i < MAX_WAGERS; i++) {
-    //
-    // }
-
+    printf("Wagers\n");
+    printf("W: [%zu] ", game->winner_bets.count);
+    printf("L: [%zu] ", game->loser_bets.count);
     // render tickets
 
     printf("\nTickets\n");
@@ -496,7 +678,7 @@ void render_horizontal(Game* game) {
     printf("\nPlayers\n");
 
     for (int i = 0; i < N_PLAYERS; i++) {
-        printf(" %d (%d)| ", game->players[i].id, game->players[i].points);
+        printf(" %d (%2d)| ", game->players[i].id, game->players[i].points);
         for (int j = 0; j < N_BETS_COLORS; j++) {
             for (int k = 0; k < N_TICKETS; k++) {
                 if (game->tickets[j][k].player_id == i) {
@@ -508,7 +690,7 @@ void render_horizontal(Game* game) {
         printf("\n");
     }
 
-    printf("\nBoard\n");
+    printf("\nBoard");
 
     // render board
     for (size_t i = N_CAMELS; i > 0; i--) {
@@ -516,7 +698,7 @@ void render_horizontal(Game* game) {
         for (size_t j = 0; j < BOARD_SIZE; j++) {
 
             if (game->board[j].has_spec && i == 1) {
-                printf(" %s1 ", oreint2char(game->board[j].spec.orientation));
+                printf(" %s1 ", orient2char(game->board[j].spec.orientation));
                 continue;
             } else if (stack_count(game->board[j].camel_stack) >= i) {
                 printf(" %2s ", enum2char(game->board[j].camel_stack[i - 1].color));
@@ -530,6 +712,7 @@ void render_horizontal(Game* game) {
     for (size_t j = 0; j < BOARD_SIZE; j++) {
         printf(" %2zu ", j);
     }
+
     printf("\n");
 }
 
@@ -538,69 +721,80 @@ int main(int argc, char** argv) {
     // srand((unsigned int) time(NULL));
     srand((unsigned int) 4);
 
-    // printf("Hello World!\n");
     Game game = {0};
     init_game(&game);
     render_horizontal(&game);
     int curr_player_id = 0;
     int first, second;
+    int nturn = 0;
+    Turn turn = {0};
+	Roll die = {0};
 
     while (!game.winner) {
         while (game.round_rolled_dice > 0 && !game.winner) {
-            Player curr_player = game.players[curr_player_id];
 
-            Turn turn      = {0};
-            turn.turn_type = ROLL;
-            // turn.color       = BPURPLE;
-            // turn.orientation = FORWARD;
-            // turn.position    = 5;
+            get_user_input(&game, curr_player_id, &turn);
+            // turn.turn_type = ROLL;
 
             // get next players input
             switch (turn.turn_type) {
-            case WAGER: {
-                printf("MAKE A WAGER");
-                break;
-            }
-            case ROLL: {
-                roll_dice(&game.die);
-                printf("%d rolled %s%d\n", curr_player_id, enum2char((CamelColor) game.die.color), game.die.value);
-                move_camel(&game, game.die.color, game.die.value);
-                game.round_rolled_dice--;
-                break;
-            }
-            case TICKET: {
-                int amount = assign_ticket(&game, turn.color, curr_player_id);
-                if (amount == -1) {
-                    printf("Could not assign ticket\n");
-                    // TODO: restart turn?
-                }
-                printf("%d Picked a %s:%d Ticket\n", curr_player_id, enum2char((CamelColor) turn.color), amount);
-                break;
-            }
+                case WAGER: {
+                    LOG("Turn %d: %d made wagered %s to %s \n", nturn, curr_player_id,
+                        enum2char((CamelColor) turn.color), orient2char(turn.orientation));
 
-            case SPECTATOR: {
-                printf("Place Spectator card");
-                Spectator spec = {.orientation = turn.orientation, .player = curr_player_id};
-                bool allowed   = place_spec_tile(&game, curr_player_id, turn.position, spec);
-                if (!allowed) {
-                    printf("Could not place tile");
-                    // TODO: restart turn?
+                    Wager w = {.color = turn.color, .player = curr_player_id};
+                    if (turn.orientation == FORWARD) {
+                        wager_push(&game.winner_bets, w);
+                    } else {
+                        wager_push(&game.loser_bets, w);
+                    }
+
+                    break;
                 }
-                break;
-            }
-            default:
-                break;
+                case ROLL: {
+                    roll_dice(&game);
+					// todo move dice peek into move_camel()
+                    dice_peek(&game.dice, &die);
+                    LOG("Turn %d: %d rolled %s%d\n", nturn, curr_player_id, enum2char((CamelColor) die.color),
+                        die.value);
+                    move_camel(&game, die.color, die.value);
+                    game.round_rolled_dice--;
+                    game.players[curr_player_id].points++;
+                    break;
+                }
+                case TICKET: {
+                    int amount = assign_ticket(&game, turn.color, curr_player_id);
+                    if (amount == -1) {
+                        LOG("Turn %d: Could not assign ticket to %d", nturn, curr_player_id);
+                        // TODO: restart turn?
+                    }
+                    LOG("Turn %d: %d picked a %s:%d Ticket", nturn, curr_player_id, enum2char((CamelColor) turn.color),
+                        amount);
+                    break;
+                }
+
+                case SPECTATOR: {
+                    Spectator spec = {.orientation = turn.orientation, .player = curr_player_id};
+                    bool allowed   = place_spec_tile(&game, curr_player_id, turn.position, spec);
+                    if (!allowed) {
+                        LOG("Turn %d: %d COULD NOT place Spectator card (%s1) on %d", nturn, curr_player_id,
+                            orient2char(turn.orientation), turn.position);
+                        // TODO: restart turn?
+                    }
+                    LOG("Turn %d: %d placed Spectator card (%s1) on %d", nturn, curr_player_id,
+                        orient2char(turn.orientation), turn.position);
+                    break;
+                }
+                default:
+                    break;
             }
 
             // render game state
-
             printf("\e[1;1H\e[2J"); // clear screen
             render_horizontal(&game);
 
-            curr_player_id = (curr_player.id + 1) % N_PLAYERS;
-            printf("Press Any Key to Continue\n");
-            getchar();
-            // game.winner    = true;
+            curr_player_id = (curr_player_id + 1) % N_PLAYERS;
+            nturn++;
         }
 
         // give out points for round
@@ -608,8 +802,9 @@ int main(int argc, char** argv) {
         render_horizontal(&game);
         printf("First place: %s\tSecond Place: %s\n", enum2char((CamelColor) first), enum2char((CamelColor) second));
     }
-    // winning_player = end_game(); // give out wagers and select winner
-    // render again showing winner
+
+    printf("GAME OVER! First place: %s\tSecond Place: %s\n", enum2char((CamelColor) first),
+           enum2char((CamelColor) second));
 
     return 0;
 }
