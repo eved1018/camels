@@ -18,10 +18,10 @@ BINDIR = bin
 HDRDIR = include
 TSTDIR = test
 TSTOBJDIR = $(TSTDIR)/build
-TSTBINDIR = $(TSTDIR)/bin
+TSTBINDIR = build/test
 
 # Add include directory to CFLAGS
-CFLAGS += -I$(HDRDIR)
+CFLAGS += -I$(HDRDIR) -I$(SRCDIR)
 
 # Find all .c source files and .h header files
 SOURCES := $(wildcard $(SRCDIR)/*.c)
@@ -48,6 +48,7 @@ TEST_EXECUTABLES := $(patsubst $(TSTDIR)/%.c,$(TSTBINDIR)/%,$(TEST_SOURCES))
 
 # Prevent Make from deleting intermediate object files
 .PRECIOUS: $(OBJECTS_MAIN) $(OBJECTS_TEST) $(TEST_OBJECTS)
+
 # Default target: build the executable
 default: makedir build
 
@@ -72,9 +73,6 @@ $(OBJDIR_TEST):
 $(TSTOBJDIR):
 	@mkdir -p $(TSTOBJDIR)
 
-$(TSTBINDIR):
-	@mkdir -p $(TSTBINDIR)
-
 # Rule to create all directories (for manual use)
 .PHONY: makedir
 makedir:
@@ -82,7 +80,6 @@ makedir:
 	@mkdir -p $(OBJDIR_MAIN)
 	@mkdir -p $(OBJDIR_TEST)
 	@mkdir -p $(TSTOBJDIR)
-	@mkdir -p $(TSTBINDIR)
 
 # Rule to link object files into the main executable
 $(EXECUTABLE): $(OBJECTS_MAIN) | $(BINDIR)
@@ -101,16 +98,16 @@ $(OBJDIR_TEST)/%.o: $(SRCDIR)/%.c | $(OBJDIR_TEST)
 $(TSTOBJDIR)/%.o: $(TSTDIR)/%.c | $(TSTOBJDIR)
 	$(CC) $(CFLAGS) -I$(TSTDIR) -c $< -o $@
 
-# Rule to link test executables in test/bin directory
-# Links test object with library objects compiled with TEST_BUILD flag
-$(TSTBINDIR)/%: $(TSTOBJDIR)/%.o $(OBJECTS_TEST) | $(TSTBINDIR)
-	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+# Rule to link test executables in build/test directory
+# Test files include all source files, so only link the test object
+$(TSTBINDIR)/%: $(TSTOBJDIR)/%.o | $(TSTBINDIR)
+	$(CC) $(LDFLAGS) $< -o $@ $(LDLIBS)
 
 # Clean up generated files and directories
 .PHONY: clean
 clean:
 	rm -rf build $(BINDIR)
-	rm -rf $(TSTOBJDIR) $(TSTBINDIR)
+	rm -rf $(TSTOBJDIR)
 
 # Run the executable
 .PHONY: run
@@ -121,6 +118,7 @@ run: build
 .PHONY: test
 test: $(TEST_EXECUTABLES)
 	@$(foreach test_bin,$(TEST_EXECUTABLES),$(test_bin) || exit 1;)
+
 # Display help information
 .PHONY: help
 help:
@@ -142,5 +140,7 @@ help:
 	@echo "  make clean        # Clean all generated files"
 	@echo ""
 	@echo "Build structure:"
-	@echo "  build/main/  - Objects for main executable"
-	@echo "  build/test/  - Objects for test builds (with TEST_BUILD defined)"
+	@echo "  build/main/      - Objects for main executable"
+	@echo "  build/test/      - Objects for test builds and test executables"
+	@echo "  bin/             - Main executable"
+	@echo "  test/build/      - Test source objects"

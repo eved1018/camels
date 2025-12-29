@@ -138,7 +138,6 @@ typedef struct {
     int id;
     int points;
     bool used_spec;
-    int hand_size;
     Hand hand[N_BETS_COLORS]; // the color cards you have left to bet for dinner or loser
 } Player;
 
@@ -162,67 +161,52 @@ typedef struct {
 #define stack_peak(s)    ((s)->items[(s)->count - 1])
 #define stack_count(s)   ((s)->count)
 
-//
-// bool wager_push(Wagers* wagers, Wager w) {
-//     if (wagers->count < MAX_WAGERS) {
-//         wagers->items[wagers->count++] = w;
-//         return true;
-//     }
-//     return false;
-// }
-//
-// bool wager_pop(Wagers* wagers, Wager* w) {
-//     if (wagers->count > 0) {
-//         *w = wagers->items[--wagers->count];
-//         return true;
-//     }
-//     return false;
-// }
-//
-// bool dice_push(Dice* dice, Roll r) {
-//     if (dice->count < N_DICE) {
-//         dice->rolled[dice->count++] = r;
-//         return true;
-//     }
-//     return false;
-// }
-//
-// bool dice_pop(Dice* dice, Roll* r) {
-//     if (dice->count > 0) {
-//         *r = dice->rolled[--dice->count];
-//         return true;
-//     }
-//     return false;
-// }
-//
-// Roll dice_peek(Dice* dice) { return dice->rolled[dice->count - 1]; }
-//
-//
-// bool camels_push(Wagers* wagers, Wager w) {
-//     if (wagers->count < MAX_WAGERS) {
-//         wagers->items[wagers->count++] = w;
-//         return true;
-//     }
-//     return false;
-// }
-//
-// bool camels_pop(CamelStack* camels, Camel* w) {
-//     if (camels->count > 0) {
-//         *w = camels->items[--wagers->count];
-//         return true;
-//     }
-//     return false;
-// }
-//
-// bool camels_empty(){
-// }
-
 int compare(const void* p1, const void* p2) {
     Player* e1 = (Player*) p1;
     Player* e2 = (Player*) p2;
     return e1->points - e2->points;
 }
 //////////////////////////////////// Game State //////////////////////////////////////
+
+int hand_size(Player* player) {
+    int c = 0;
+    for (size_t i = 0; i < N_BETS_COLORS; i++) {
+        if (player->hand[i].used == false) {
+            c++;
+        }
+    }
+    return c;
+}
+
+bool remove_card_from_hand(Player* player, BetColor color) {
+    for (size_t i = 0; i < N_BETS_COLORS; i++) {
+        if (player->hand[i].color == color) {
+            if (player->hand[i].used == true) {
+                return false;
+            }
+            player->hand[i].used = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+void init_player_hand(Player* player) {
+    player->hand[0] = (Hand) {BRED, false};
+    player->hand[1] = (Hand) {BBLUE, false};
+    player->hand[2] = (Hand) {BYELLOW, false};
+    player->hand[3] = (Hand) {BGREEN, false};
+    player->hand[4] = (Hand) {BPURPLE, false};
+}
+
+bool has_card_in_hand(Player* player, BetColor color) {
+    for (size_t i = 0; i < N_BETS_COLORS; i++) {
+        if (player->hand[i].color == color) {
+            return !player->hand[i].used;
+        }
+    }
+    return false;
+}
 
 int rand_range(int low, int high) { return (rand() % (high - low + 1)) + low; }
 
@@ -289,8 +273,10 @@ void init_game(Game* game) {
                             .hand      = {{BRED, false}, {BBLUE, false}, {BYELLOW, false}, {BGREEN, false}, {BPURPLE, false}}};
         game->players[i] = p;
     }
-    TicketStack ts = {0};
-    ts.capacity    = N_TICKETS * N_BETS_COLORS;
+    for (int i = 0; i < N_BETS_COLORS; i++) {
+        game->tickets[i].capacity = N_TICKETS;
+        game->tickets[i].count    = 0;
+    }
     reset_tickets(game);
 
     ///// Wagers /////////
@@ -602,10 +588,6 @@ void get_user_input(Game* game, int player_id, Turn* turn) {
         };
         case 'W': {
             turn->turn_type = WAGER;
-            if (game->players[player_id].hand_size < 0) {
-                printf("No cards to wager\n");
-                get_user_input(game, player_id, turn); // TODO RESET
-            }
             printf("[W]inner or [L]oser\n");
             input_char = read_char();
             switch (input_char) {
@@ -648,7 +630,6 @@ void get_user_input(Game* game, int player_id, Turn* turn) {
                 };
                 default:
                     get_user_input(game, player_id, turn); // TODO RESET
-
                     break;
             }
             break;
@@ -810,16 +791,7 @@ bool next_turn(Game* game, Turn* turn, int curr_player_id) {
             LOG("Turn %d: %d made wagered %s to %s \n", game->turn, curr_player_id, enum2char((CamelColor) turn->color),
                 orient2char(turn->orientation));
 
-            bool in_hand = false;
-            for (int i = 0; i < game->players[curr_player_id].hand_size; i++) {
-                if (game->players[curr_player_id].hand[i].color == turn->color &&
-                    game->players[curr_player_id].hand[i].used == false) {
-                    in_hand                                    = true;
-                    game->players[curr_player_id].hand[i].used = true;
-                }
-            }
-
-            if (!in_hand) {
+            if (!remove_card_from_hand(&game->players[curr_player_id], turn->color)) {
                 return false;
             }
 
