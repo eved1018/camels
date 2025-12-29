@@ -1,7 +1,6 @@
 bin/
 build/
+test/build/
 .cache/
 compile_commands.json
 *.log
-*.d
-*.o
