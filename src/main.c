@@ -784,9 +784,9 @@ void render_horizontal(Game* game) {
     printf("\n");
     if (game->winner) {
         printf("\nGame Over!:\n");
-        printf("Scores\n");
-        for (size_t i = N_PLAYERS; i > 0; i--) {
-            printf("%zu: %d %d \n", i, game->players[i].id, game->players[i].points);
+        printf("Pos\tPlayer\tScore\n");
+        for (size_t i = 0; i < N_PLAYERS; i++) {
+            printf("%zu\t%d\t%d\n", i, game->players[i].id, game->players[i].points);
         }
     }
 }
@@ -851,8 +851,8 @@ bool next_turn(Game* game, Turn* turn, int curr_player_id) {
 
 #ifndef TEST_BUILD
 int main(int argc, char** argv) {
-    // srand((unsigned int) time(NULL));
-    srand((unsigned int) 4);
+    srand((unsigned int) time(NULL));
+    // srand((unsigned int) 4);
 
     Game game = {0};
     init_game(&game);
@@ -863,7 +863,6 @@ int main(int argc, char** argv) {
     int curr_player_id = 0;
     int first, second;
     Turn turn = {0};
-    // Roll die  = {0};
     while (!game.winner) {
         while (game.dice.count != N_DICE && !game.winner) {
             bool valid_turn = false;
