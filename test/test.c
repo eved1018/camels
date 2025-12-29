@@ -73,11 +73,11 @@ static char* test_init_player_hand(void) {
     init_player_hand(&player);
 
     mu_assert("Hand size should be 5", hand_size(&player) == N_BETS_COLORS);
-    mu_assert("Should have RED",     player.hand[0].color == BRED);
-    mu_assert("Should have BLUE",    player.hand[1].color == BBLUE);
-    mu_assert("Should have YELLOW" , player.hand[2].color == BYELLOW);
-    mu_assert("Should have GREEN",   player.hand[3].color == BGREEN);
-    mu_assert("Should have PURPLE",  player.hand[4].color == BPURPLE);
+    mu_assert("Should have RED", player.hand[0].color == BRED);
+    mu_assert("Should have BLUE", player.hand[1].color == BBLUE);
+    mu_assert("Should have YELLOW", player.hand[2].color == BYELLOW);
+    mu_assert("Should have GREEN", player.hand[3].color == BGREEN);
+    mu_assert("Should have PURPLE", player.hand[4].color == BPURPLE);
 
     return 0;
 }
@@ -415,7 +415,6 @@ static char* test_end_round_resets(void) {
     return 0;
 }
 
-
 //////////////////////////////////// Integration Tests //////////////////////////////////////
 
 static char* test_full_round_playthrough(void) {
@@ -470,6 +469,388 @@ static char* test_rand_range(void) {
     return 0;
 }
 
+//////////////////////////////////// Advanced Scoring Tests //////////////////////////////////////
+
+static char* test_multiple_tickets_same_color(void) {
+    Game* game = setup_game();
+
+    // Three players take RED tickets
+    assign_ticket(game, BRED, 0); // Gets 5
+    assign_ticket(game, BRED, 1); // Gets 3
+    assign_ticket(game, BRED, 2); // Gets 2
+
+    int p0_points = game->players[0].points;
+    int p1_points = game->players[1].points;
+    int p2_points = game->players[2].points;
+
+    // RED wins, BLUE second
+    assign_points(game, CRED, CBLUE);
+
+    mu_assert("Player 0 should get 5 points", game->players[0].points == p0_points + 5);
+    mu_assert("Player 1 should get 3 points", game->players[1].points == p1_points + 3);
+    mu_assert("Player 2 should get 2 points", game->players[2].points == p2_points + 2);
+
+    return 0;
+}
+
+static char* test_second_place_ticket_scoring(void) {
+    Game* game = setup_game();
+
+    // Player takes BLUE ticket
+    assign_ticket(game, BBLUE, 0);
+    int initial = game->players[0].points;
+
+    // RED wins, BLUE second
+    assign_points(game, CRED, CBLUE);
+
+    mu_assert("Second place ticket should give 1 point", game->players[0].points == initial + 1);
+
+    return 0;
+}
+
+static char* test_losing_ticket_penalty(void) {
+    Game* game = setup_game();
+
+    // Player takes YELLOW, GREEN, PURPLE tickets (all lose)
+    assign_ticket(game, BYELLOW, 0);
+    assign_ticket(game, BGREEN, 1);
+    assign_ticket(game, BPURPLE, 2);
+
+    int p0_initial = game->players[0].points;
+    int p1_initial = game->players[1].points;
+    int p2_initial = game->players[2].points;
+
+    // RED wins, BLUE second (YELLOW, GREEN, PURPLE lose)
+    assign_points(game, CRED, CBLUE);
+
+    mu_assert("Losing ticket should lose 1 point", game->players[0].points == p0_initial - 1);
+    mu_assert("Losing ticket should lose 1 point", game->players[1].points == p1_initial - 1);
+    mu_assert("Losing ticket should lose 1 point", game->players[2].points == p2_initial - 1);
+
+    return 0;
+}
+
+static char* test_mixed_ticket_scoring(void) {
+    Game* game = setup_game();
+
+    // Different outcomes for different players
+    assign_ticket(game, BRED, 0);    // Winner: +5
+    assign_ticket(game, BBLUE, 1);   // Second: +1
+    assign_ticket(game, BYELLOW, 2); // Loser: -1
+
+    int p0_initial = game->players[0].points;
+    int p1_initial = game->players[1].points;
+    int p2_initial = game->players[2].points;
+
+    assign_points(game, CRED, CBLUE);
+
+    mu_assert("Winner ticket holder gets points", game->players[0].points == p0_initial + 5);
+    mu_assert("Second place holder gets 1", game->players[1].points == p1_initial + 1);
+    mu_assert("Loser loses 1", game->players[2].points == p2_initial - 1);
+
+    return 0;
+}
+
+static char* test_wager_scoring_correct_guess(void) {
+    Game* game = setup_game();
+
+    // Players make wagers on winner
+    Wager w1 = {.player = 0, .color = BRED};
+    Wager w2 = {.player = 1, .color = BRED};
+    Wager w3 = {.player = 2, .color = BRED};
+    Wager w4 = {.player = 3, .color = BRED};
+    Wager w5 = {.player = 4, .color = BRED};
+    Wager w6 = {.player = 5, .color = BRED};
+
+    stack_push(&game->winner_bets, w1);
+    stack_push(&game->winner_bets, w2);
+    stack_push(&game->winner_bets, w3);
+    stack_push(&game->winner_bets, w4);
+    stack_push(&game->winner_bets, w5);
+    stack_push(&game->winner_bets, w6);
+
+    int p0_initial = game->players[0].points;
+    int p1_initial = game->players[1].points;
+    int p2_initial = game->players[2].points;
+    int p3_initial = game->players[3].points;
+    int p4_initial = game->players[4].points;
+    int p5_initial = game->players[5].points;
+
+    // RED wins, BLUE loses
+    score_wagers(game, BRED, BBLUE);
+
+    // First bet gets 8, second gets 5, third gets 3
+    mu_assert("First wager should get 8 points", game->players[0].points == p0_initial + 8);
+    mu_assert("Second wager should get 5 points", game->players[1].points == p1_initial + 5);
+    mu_assert("Third wager should get 3 points", game->players[2].points == p2_initial + 3);
+    mu_assert("Fourth wager should get 2 points", game->players[3].points == p3_initial + 2);
+    mu_assert("Fifth wager should get 1 points", game->players[4].points == p4_initial + 1);
+    mu_assert("Sixth wager should get 1 points", game->players[5].points == p5_initial + 1);
+    return 0;
+}
+
+static char* test_wager_scoring_wrong_guess(void) {
+    Game* game = setup_game();
+
+    // Players bet on BLUE to win, but RED wins
+    Wager w1 = {.player = 0, .color = BBLUE};
+    Wager w2 = {.player = 1, .color = BBLUE};
+
+    stack_push(&game->winner_bets, w1);
+    stack_push(&game->winner_bets, w2);
+
+    int p0_initial = game->players[0].points;
+    int p1_initial = game->players[1].points;
+
+    // RED wins (not BLUE)
+    score_wagers(game, BRED, BYELLOW);
+
+    mu_assert("Wrong winner wager loses 1 point", game->players[0].points == p0_initial - 1);
+    mu_assert("Wrong winner wager loses 1 point", game->players[1].points == p1_initial - 1);
+
+    return 0;
+}
+static char* test_loser_wager_scoring(void) {
+    Game* game = setup_game();
+
+    // Players bet on who will lose
+    Wager w1 = {.player = 0, .color = BYELLOW};
+    Wager w2 = {.player = 1, .color = BYELLOW};
+    Wager w3 = {.player = 2, .color = BGREEN}; // Wrong guess
+
+    stack_push(&game->loser_bets, w1);
+    stack_push(&game->loser_bets, w2);
+    stack_push(&game->loser_bets, w3);
+
+    int p0_initial = game->players[0].points;
+    int p1_initial = game->players[1].points;
+    int p2_initial = game->players[2].points;
+
+    // RED wins, YELLOW loses
+    score_wagers(game, BRED, BYELLOW);
+
+    mu_assert("First correct loser bet gets 8", game->players[0].points == p0_initial + 8);
+    mu_assert("Second correct loser bet gets 5", game->players[1].points == p1_initial + 5);
+    mu_assert("Wrong loser bet loses 1", game->players[2].points == p2_initial - 1);
+
+    return 0;
+}
+
+static char* test_score_round_integration(void) {
+    Game* game = setup_game();
+
+    // Setup: Tickets and positions
+    assign_ticket(game, BRED, 0);
+    assign_ticket(game, BBLUE, 1);
+    assign_ticket(game, BYELLOW, 2);
+
+    // Move camels to specific positions
+    // We need to ensure RED is first, BLUE is second
+    Camel* red    = get_camel(game, CRED);
+    Camel* blue   = get_camel(game, CBLUE);
+    Camel* yellow = get_camel(game, CYELLOW);
+
+    // Move RED to position 10 (higher than others)
+    move_camel(game, CRED, 10 - red->space);
+    // Move BLUE to position 9
+    move_camel(game, CBLUE, 9 - blue->space);
+    // Move YELLOW to position 5
+    move_camel(game, CYELLOW, 5 - yellow->space);
+
+    int p0_initial = game->players[0].points;
+    int p1_initial = game->players[1].points;
+    int p2_initial = game->players[2].points;
+
+    int first, second;
+    score_round(game, &first, &second);
+
+    mu_assert("First should be RED", first == CRED);
+    mu_assert("Second should be BLUE", second == CBLUE);
+    mu_assert("RED ticket holder gained points", game->players[0].points > p0_initial);
+    mu_assert("BLUE ticket holder gained 1 point", game->players[1].points == p1_initial + 1);
+    mu_assert("YELLOW ticket holder lost 1 point", game->players[2].points == p2_initial - 1);
+
+    return 0;
+}
+
+static char* test_full_game_scoring(void) {
+    Game* game = setup_game();
+
+    // Setup wagers: Player 0 is FIRST, Player 1 is SECOND
+    Wager w1 = {.player = 0, .color = BRED};
+    Wager w2 = {.player = 1, .color = BRED};
+    stack_push(&game->winner_bets, w1);
+    stack_push(&game->winner_bets, w2);
+
+    // Player 0 takes RED ticket (5 pts)
+    // Player 1 takes BLUE ticket (1 pt if BLUE is second)
+    assign_ticket(game, BRED, 0);
+    assign_ticket(game, BBLUE, 1);
+
+    // Simulate game end - move RED to winning position
+    Camel* red = get_camel(game, CRED);
+    move_camel(game, CRED, BOARD_SIZE - 1 - red->space);
+
+    // Ensure we know who is second for the ticket points
+    Camel* blue = get_camel(game, CBLUE);
+    move_camel(game, CBLUE, (BOARD_SIZE - 2) - blue->space);
+
+    int p0_initial = game->players[0].points;
+    int p1_initial = game->players[1].points;
+
+    int first, second;
+    score_round(game, &first, &second);
+
+    // NEW FIFO CALCULATION:
+    // Player 0: +5 (Ticket) + 8 (1st Wager) = +13 points
+    // Player 1: +1 (2nd Place Ticket) + 5 (2nd Wager) = +6 points
+
+    mu_assert("Player 0 should gain 13 points", game->players[0].points == p0_initial + 13);
+    mu_assert("Player 1 should gain 6 points", game->players[1].points == p1_initial + 6);
+
+    return 0;
+}
+
+static char* test_tickets_reset_after_round(void) {
+    Game* game = setup_game();
+
+    // Take some tickets
+    assign_ticket(game, BRED, 0);
+    assign_ticket(game, BBLUE, 1);
+    assign_ticket(game, BRED, 2);
+
+    mu_assert("Tickets should be assigned", game->tickets[BRED].items[0].player_id == 0);
+    mu_assert("Tickets should be assigned", game->tickets[BBLUE].items[0].player_id == 1);
+
+    // End round should reset tickets
+    end_round(game);
+
+    mu_assert("Tickets should be reset", game->tickets[BRED].items[0].player_id == -1);
+    mu_assert("Tickets should be reset", game->tickets[BBLUE].items[0].player_id == -1);
+    mu_assert("All tickets should be available", game->tickets[BRED].count == N_TICKETS);
+
+    return 0;
+}
+
+
+static char* test_spectator_tile_points(void) {
+    Game* game = setup_game();
+
+    // Place spectator tile
+    Spectator spec = {.player = 0, .orientation = FORWARD};
+    place_spec_tile(game, 0, 5, spec);
+
+    int initial_points = game->players[0].points;
+
+    // Move a camel onto the spectator tile
+    Camel* red         = get_camel(game, CRED);
+    int spaces_to_spec = 5 - red->space;
+    move_camel(game, CRED, spaces_to_spec);
+
+    mu_assert("Spectator owner should get 1 point", game->players[0].points == initial_points + 1);
+
+    return 0;
+}
+
+static char* test_roll_gives_point(void) {
+    Game* game = setup_game();
+
+    int initial_points = game->players[0].points;
+
+    // Simulate a roll
+    roll_dice(game);
+    Roll die = stack_peak(&game->dice);
+    move_camel(game, die.color, die.value);
+    game->players[0].points++; // This is what happens in next_turn
+
+    mu_assert("Rolling should give 1 point", game->players[0].points == initial_points + 1);
+
+    return 0;
+}
+static char* test_wager_scoring_mixed_fifo(void) {
+    Game* game = setup_game(); // Resets game state
+
+    // Player 0: Correct (8 pts)
+    // Player 1: Wrong (-1 pt)
+    // Player 2: Correct (5 pts)
+    stack_push(&game->winner_bets, ((Wager){.player = 0, .color = BRED}));
+    stack_push(&game->winner_bets, ((Wager){.player = 1, .color = BBLUE}));
+    stack_push(&game->winner_bets, ((Wager){.player = 2, .color = BRED}));
+
+    int p0_init = game->players[0].points;
+    int p1_init = game->players[1].points;
+    int p2_init = game->players[2].points;
+
+    score_wagers(game, BRED, BYELLOW);
+
+    mu_assert("First correct (P0) gets 8", game->players[0].points == p0_init + 8); //
+    mu_assert("Wrong bet (P1) loses 1", game->players[1].points == p1_init - 1);    //
+    mu_assert("Second correct (P2) gets 5", game->players[2].points == p2_init + 5); //
+    return 0;
+}
+
+
+static char* test_wager_stack_at_capacity(void) {
+    Game* game = setup_game();
+    Wager w    = {.player = 0, .color = BRED};
+
+    // Fill to capacity
+    for (int i = 0; i < MAX_WAGERS; i++) {
+        mu_assert("Should allow pushing up to capacity", stack_push(&game->winner_bets, w));
+    }
+
+    // Try one more
+    mu_assert("Should not allow pushing beyond capacity", !stack_push(&game->winner_bets, w));
+    mu_assert("Count should remain at MAX_WAGERS", game->winner_bets.count == MAX_WAGERS);
+    return 0;
+}
+static char* test_wagers_clear_after_scoring(void) {
+    Game* game = setup_game();
+    stack_push(&game->winner_bets, ((Wager) {.player = 0, .color = BRED}));
+
+    score_wagers(game, BRED, BBLUE);
+    mu_assert("Winner bets should be empty after scoring", game->winner_bets.count == 0);
+
+    int points_after_score = game->players[0].points;
+    score_wagers(game, BRED, BBLUE); // Call again
+    mu_assert("Points should not increase a second time", game->players[0].points == points_after_score);
+    return 0;
+}
+static char* test_stack_victory_order(void) {
+    Game* game = setup_game();
+
+    // Move Red and Blue to the finish line in a stack
+    // Red on bottom (index 0), Blue on top (index 1)
+    game->board[BOARD_SIZE - 1].camel_stack.count = 0;
+    move_camel(game, CRED, (BOARD_SIZE - 1) - get_camel(game, CRED)->space);
+    move_camel(game, CBLUE, (BOARD_SIZE - 1) - get_camel(game, CBLUE)->space);
+
+    int first, second;
+    get_top_camels(game, &first, &second);
+
+    mu_assert("Top camel (BLUE) should be first", first == CBLUE);
+    mu_assert("Bottom camel (RED) should be second", second == CRED);
+    return 0;
+}
+static char* test_spectator_reverse_move(void) {
+    Game* game = setup_game();
+    Spectator spec = {.player = 5, .orientation = REVERSE};
+    place_spec_tile(game, 5, 10, spec); // Place at 10
+
+    Camel* red = get_camel(game, CRED);
+    
+    // We calculate the move based on the CURRENT position
+    int move_amount = 10 - red->space; 
+    move_camel(game, CRED, move_amount); 
+
+    // CRITICAL FIX: Re-fetch the pointer!
+    // The camel has moved to a new memory address in a different stack.
+    red = get_camel(game, CRED); 
+
+    mu_assert("Camel should bounce back to 9", red->space == 9);
+    mu_assert("Owner of spectator tile should get 1 point", game->players[5].points == 1);
+    return 0;
+}
 //////////////////////////////////// Test Suite //////////////////////////////////////
 
 static char* all_tests(void) {
@@ -524,6 +905,24 @@ static char* all_tests(void) {
     mu_run_test(test_enum2char);
     mu_run_test(test_orient2char);
     mu_run_test(test_rand_range);
+    printf("Running Advanced Scoring Tests...\n");
+    mu_run_test(test_multiple_tickets_same_color);
+    mu_run_test(test_second_place_ticket_scoring);
+    mu_run_test(test_losing_ticket_penalty);
+    mu_run_test(test_mixed_ticket_scoring);
+    mu_run_test(test_wager_scoring_correct_guess);
+    mu_run_test(test_wager_scoring_wrong_guess);
+    mu_run_test(test_loser_wager_scoring);
+    mu_run_test(test_score_round_integration);
+    mu_run_test(test_full_game_scoring);
+    mu_run_test(test_tickets_reset_after_round);
+    mu_run_test(test_spectator_tile_points);
+    mu_run_test(test_roll_gives_point);
+    mu_run_test(test_wager_scoring_mixed_fifo);
+    mu_run_test(test_wager_stack_at_capacity);
+    mu_run_test(test_wagers_clear_after_scoring);
+    mu_run_test(test_stack_victory_order);
+    mu_run_test(test_spectator_reverse_move);
 
     return 0;
 }

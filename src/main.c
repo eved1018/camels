@@ -155,7 +155,7 @@ typedef struct {
 } Game;
 
 //////////////////////////////////// Stack //////////////////////////////////////
-#define stack_push(s, i) (((s)->count < (s)->capacity) ? (s)->items[(s)->count++] = (i), true : false)
+#define stack_push(s, i) (((s)->count < (s)->capacity) ? ((s)->items[(s)->count++] = (i), true) : false)
 #define stack_pop(s, i)  ((s)->count > 0 ? * i = (s)->items[--(s)->count], (true) : (false))
 #define stack_empty(s)   ((s)->count == 0 ? true : false)
 #define stack_peak(s)    ((s)->items[(s)->count - 1])
@@ -213,7 +213,8 @@ int rand_range(int low, int high) { return (rand() % (high - low + 1)) + low; }
 void reset_tickets(Game* game) {
 
     for (int i = 0; i < N_BETS_COLORS; i++) {
-        BetColor color = (BetColor) i;
+        BetColor color         = (BetColor) i;
+        game->tickets[i].count = 0; // ← Reset count
         for (int j = 0; j < N_TICKETS; j++) {
             int amount;
             if (j == 0) {
@@ -290,28 +291,36 @@ void init_game(Game* game) {
 }
 
 void score_wagers(Game* game, BetColor first, BetColor last) {
-
-    // give out points for bets
-    Wager w       = {0};
-    int scores[6] = {1, 2, 3, 5, 8};
-    int n         = 5;
-    while (stack_pop(&game->winner_bets, &w)) {
+    int scores[5] = {8, 5, 3, 2, 1}; // Points for 1st, 2nd, 3rd, 4th, 5th+ correct wagers
+                                     // Process Winner Bets FIFO
+    int winner_idx = 0;
+    for (size_t i = 0; i < game->winner_bets.count; i++) {
+        Wager w = game->winner_bets.items[i];
         if (w.color == first) {
-            game->players[w.player].points += scores[n];
-            n = (n > 0) ? (n - 1) : 0;
+            // Use the score corresponding to their order, floor at 1 point
+            int points = (winner_idx < 5) ? scores[winner_idx] : 1;
+            game->players[w.player].points += points;
+            winner_idx++;
         } else {
             game->players[w.player].points--;
         }
     }
-    n = 5;
-    while (stack_pop(&game->loser_bets, &w)) {
+
+    // Process Loser Bets FIFO
+    int loser_idx = 0;
+    for (size_t i = 0; i < game->loser_bets.count; i++) {
+        Wager w = game->loser_bets.items[i];
         if (w.color == last) {
-            game->players[w.player].points += scores[n];
-            n = (n > 0) ? (n - 1) : 0;
+            int points = (loser_idx < 5) ? scores[loser_idx] : 1;
+            game->players[w.player].points += points;
+            loser_idx++;
         } else {
             game->players[w.player].points--;
         }
     }
+    // resset for testing
+    game->winner_bets.count = 0; //
+    game->loser_bets.count  = 0; //
 }
 
 void assign_points(Game* game, CamelColor top, CamelColor second) {
@@ -504,9 +513,8 @@ void move_camel(Game* game, CamelColor color, int spaces) {
     }
     dest = curr_space + spaces;
 
-    if (dest < 0) {
+    if (dest < 0)
         dest = 0;
-    }
 
     if (dest >= BOARD_SIZE - 1) {
         game->winner = true;
@@ -524,7 +532,7 @@ void move_camel(Game* game, CamelColor color, int spaces) {
     CamelStack* dest_stack = &game->board[dest].camel_stack;
 
     bool match_found = false;
-    while (!match_found) { // pop from start stack until we reach desired camel
+    while (!match_found && stack->count > 0) { // pop from start stack until we reach desired camel
         stack_pop(stack, &curr_camel);
         match_found = curr_camel.color == color ? true : false;
         stack_push(&tmp, curr_camel);
